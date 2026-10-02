@@ -18,6 +18,8 @@ canvas{display:block;width:100%;height:100%}
 #msg h1{font-size:30px;margin:0 0 10px}
 #msg p{margin:4px 0;font-size:16px;line-height:1.5}
 button{margin-top:18px;font-size:20px;font-weight:700;padding:12px 32px;border:0;border-radius:28px;background:var(--accent);color:#222}
+#board{position:absolute;top:50px;right:10px;font-size:13px;line-height:1.5;text-align:right;pointer-events:none;text-shadow:0 1px 3px #000;max-width:46%}
+#nick{font-size:18px;padding:8px 12px;border-radius:12px;border:0;margin-top:10px;text-align:center;width:150px}
 #fire{position:absolute;right:16px;bottom:calc(24px + env(safe-area-inset-bottom,0px));width:84px;height:84px;border-radius:50%;background:#ff4d4dcc;border:3px solid #fff;font-size:30px;display:flex;align-items:center;justify-content:center}
 </style>
 </head>
@@ -26,10 +28,12 @@ button{margin-top:18px;font-size:20px;font-weight:700;padding:12px 32px;border:0
 <canvas id="c"></canvas>
 <div id="hud"><span id="time">⏱ 3:00</span><span id="hp">❤️❤️❤️</span><span id="score">⭐ 0</span></div>
 <div id="bar"><div id="fill"></div></div>
+<div id="board"></div>
 <div id="fire">💥</div>
 <div id="msg"><h1>🐯 호랑이 우주 대작전</h1>
 <p>화면을 누르고 있으면 그 방향으로 날아가요!<br>자동으로 총알이 나가요 (💥 버튼은 연속 발사)<br>PC: 방향키/WASD 이동, 스페이스 발사</p>
-<p>바위를 피하고 적기를 물리쳐서<br><b>3분</b>을 버티면 승리!</p>
+<p>바위를 피하고 적기를 물리쳐서<br><b>3분</b>을 버티면 승리!<br>같은 주소로 들어온 친구들과 함께 날아요!</p>
+<p id="online">🌐 접속 중...</p><input id="nick" maxlength="8" placeholder="내 이름">
 <button id="go">시작하기</button></div>
 </div>
 <script>
@@ -43,7 +47,8 @@ let P,rocks,enemies,bullets,ebullets,stars,parts,t,hp,score,state='ready',last=0
 stars=[...Array(90)].map(()=>({x:Math.random()*3000,y:Math.random()*3000,s:Math.random()*2+.5,f:.2+Math.random()*.6}));
 const JUNK=['🛰️','📡','🔩','🔧','🥫','🔋'];
 function reset(){P={x:0,y:0,r:27,a:-Math.PI/2};rocks=[];enemies=[];bullets=[];ebullets=[];parts=[];t=0;hp=3;score=0;spawnR=0;spawnE=1.2;shotT=0;inv=0}
-function start(){reset();state='play';$('msg').style.display='none';last=performance.now();requestAnimationFrame(loop)}
+let myName='호랑이',done=0,room=null,peers=[],pt=0;
+function start(){myName=($('nick')&&$('nick').value.trim())||'호랑이'+(Math.random()*90+10|0);done=0;reset();state='play';$('msg').style.display='none';last=performance.now();requestAnimationFrame(loop)}
 $('go').onclick=start;
 function pos(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top}}
 cv.addEventListener('pointerdown',e=>{target=pos(e)});
@@ -69,7 +74,7 @@ function shoot(){let best=null,bd=1e9;for(const e of enemies){const d=Math.hypot
  if(best&&bd<RING()+40)P.a=Math.atan2(best.y-P.y,best.x-P.x);
  bullets.push({x:P.x+Math.cos(P.a)*20,y:P.y+Math.sin(P.a)*20,vx:Math.cos(P.a)*520,vy:Math.sin(P.a)*520})}
 function hit(){if(inv>0)return;hp--;inv=1.5;boom(P.x,P.y,'#ff6060');if(navigator.vibrate)navigator.vibrate(120);if(hp<=0)end(false)}
-function end(win){state='over';$('msg').style.display='flex';
+function end(win){state='over';done=win?2:1;sendPres();$('msg').style.display='flex';
  $('msg').innerHTML=`<h1>${win?'🏆 승리! 3분 버텼어요!':'💥 아쉬워요!'}</h1><p>버틴 시간: ${Math.floor(t)}초</p><p>점수: ${score}</p><button id="go2">다시 하기</button>`;
  $('go2').onclick=start}
 const far=o=>Math.hypot(o.x-P.x,o.y-P.y)>RING()+350;
@@ -103,7 +108,7 @@ function update(dt){
  for(const p of parts){p.x+=p.vx*dt;p.y+=p.vy*dt;p.l-=dt}parts=parts.filter(p=>p.l>0);
  const rem=Math.ceil(TOTAL-t);$('time').textContent='⏱ '+Math.floor(rem/60)+':'+String(rem%60).padStart(2,'0');
  $('hp').textContent='❤️'.repeat(Math.max(0,hp))+'🖤'.repeat(3-Math.max(0,hp));
- $('score').textContent='⭐ '+score;$('fill').style.width=(t/TOTAL*100)+'%'}
+ $('score').textContent='⭐ '+score;$('fill').style.width=(t/TOTAL*100)+'%';pt-=dt;if(pt<=0){pt=.12;sendPres();renderBoard()}}
 function draw(){
  ctx.fillStyle='#05061a';ctx.fillRect(0,0,W,H);ctx.fillStyle='#fff';
  for(const s of stars){const x=(((s.x-P.x*s.f)%W)+W)%W,y=(((s.y-P.y*s.f)%H)+H)%H;ctx.globalAlpha=.3+s.f/1.2;ctx.fillRect(x,y,s.s,s.s)}ctx.globalAlpha=1;
@@ -113,6 +118,9 @@ function draw(){
   if(r.type==='fire'){ctx.shadowColor='#ff6a00';ctx.shadowBlur=14}
   if(r.type==='ice'){ctx.shadowColor='#7fdcff';ctx.shadowBlur=10}
   ctx.font=r.r*2+'px serif';ctx.fillText(r.e,0,0);ctx.restore()}
+ for(const p of peers){const q=p.presence||{};if(!q.al)continue;ctx.save();ctx.translate(q.x,q.y);ctx.globalAlpha=.85;
+  ctx.save();ctx.rotate(q.a+Math.PI/2);ctx.scale(1.5,1.5);ctx.fillStyle='hsl('+hue(p.peer)+',80%,60%)';ctx.beginPath();ctx.moveTo(0,-24);ctx.lineTo(20,16);ctx.lineTo(0,8);ctx.lineTo(-20,16);ctx.closePath();ctx.fill();ctx.font='26px serif';ctx.fillText('🐯',0,-2);ctx.restore();
+  ctx.font='bold 13px sans-serif';ctx.fillStyle='#fff';ctx.fillText(String(q.n||'').slice(0,8),0,-42);ctx.restore()}
  for(const e of enemies){ctx.save();ctx.translate(e.x,e.y);ctx.rotate(e.a+Math.PI/2);ctx.font='34px serif';ctx.fillText('🛸',0,0);ctx.restore()}
  ctx.fillStyle='#ff5050';for(const b of ebullets){ctx.beginPath();ctx.arc(b.x,b.y,5,0,6.28);ctx.fill()}
  ctx.fillStyle='#7df9ff';for(const b of bullets){ctx.beginPath();ctx.arc(b.x,b.y,4,0,6.28);ctx.fill()}
@@ -122,6 +130,16 @@ function draw(){
   ctx.fillStyle='#ff9d00';ctx.beginPath();ctx.moveTo(-5,10);ctx.lineTo(0,22+Math.random()*6);ctx.lineTo(5,10);ctx.fill();
   ctx.font='26px serif';ctx.fillText('🐯',0,-2);ctx.restore()}
  ctx.restore()}
+
+function sendPres(){if(!room)return;room.presence({n:myName,x:Math.round(P.x),y:Math.round(P.y),a:+P.a.toFixed(2),hp,s:score,al:state==='play'?1:0,d:done}).catch(()=>{})}
+function hue(id){let h=0;for(const c of String(id))h=(h*31+c.charCodeAt(0))%360;return h}
+function renderBoard(){const el=$('board');if(!el)return;
+ const rows=[{n:myName+' (나)',s:score,al:state==='play',d:done,hp}];
+ for(const p of peers){const q=p.presence||{};rows.push({n:String(q.n||'?').slice(0,8),s:+q.s||0,al:!!q.al,d:q.d|0,hp:q.hp|0})}
+ rows.sort((a,b)=>b.s-a.s);
+ el.textContent='';for(const r of rows.slice(0,6)){const d=document.createElement('div');d.textContent=(r.d==2?'🏆':r.d==1?'💥':r.al?'🐯':'⏳')+' '+r.n+' '+r.s;el.appendChild(d)}
+ const o=$('online');if(o)o.textContent='🌐 함께 접속 중: '+(peers.length+1)+'명'}
+(async()=>{try{if(typeof claude!=='undefined'){room=await claude.use('room');if(room)room.onPeers(c=>{peers=c.peers.filter(p=>!p.isMe);renderBoard()},()=>{})}}catch(e){}if(!room){const o=$('online');if(o)o.textContent='🌐 혼자 하기 (온라인 연결 안 됨)'}})();
 function loop(n){if(state!=='play'){draw();return}
  const dt=Math.min(.05,(n-last)/1000);last=n;update(dt);draw();if(state==='play')requestAnimationFrame(loop)}
 reset();draw();
